@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>QR読取テスト</title>
+  <title>QR読取テスト（デバッグ版）</title>
   <style>
     body {
       font-family: sans-serif;
@@ -13,17 +13,14 @@
       background: #f7f7f7;
     }
     .wrap {
-      max-width: 720px;
+      max-width: 760px;
       margin: 0 auto;
       background: #fff;
       padding: 16px;
       border: 1px solid #ddd;
       border-radius: 8px;
     }
-    h1 {
-      font-size: 1.4rem;
-      margin-top: 0;
-    }
+    h1 { font-size: 1.4rem; margin-top: 0; }
     #reader {
       width: 100%;
       max-width: 420px;
@@ -52,6 +49,7 @@
       border-radius: 6px;
       background: #fafafa;
       word-break: break-all;
+      margin-bottom: 12px;
     }
     .label {
       font-weight: bold;
@@ -61,27 +59,42 @@
       font-size: 0.9rem;
       color: #555;
     }
-    .ok {
-      color: #0a7a2f;
-      font-weight: bold;
+    .ok { color: #0a7a2f; font-weight: bold; }
+    .ng { color: #b00020; font-weight: bold; }
+    select {
+      padding: 8px;
+      min-width: 280px;
     }
-    .ng {
-      color: #b00020;
-      font-weight: bold;
+    code {
+      background: #eee;
+      padding: 0 4px;
+      border-radius: 4px;
     }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>QR読取テスト</h1>
+    <h1>QR読取テスト（デバッグ版）</h1>
     <p class="note">
-      GitHub Pages 上で QR を読み取り、結果を表示する最小サンプルです。<br>
+      まずは「カメラが見えているか」「権限で止まっているか」を確認します。<br>
       ※ ダミーデータのみで運用してください。
     </p>
 
+    <div class="box">
+      <div class="label">状態</div>
+      <div id="status">初期化前</div>
+    </div>
+
+    <div class="box">
+      <div class="label">検出カメラ一覧</div>
+      <select id="cameraSelect"></select>
+      <div id="cameraInfo" class="note">まだ取得していません。</div>
+    </div>
+
     <div class="btns">
-      <button id="startBtn">カメラ開始</button>
-      <button id="stopBtn" disabled>カメラ停止</button>
+      <button id="initBtn">カメラ一覧取得</button>
+      <button id="startBtn" disabled>選択カメラで開始</button>
+      <button id="stopBtn" disabled>停止</button>
       <button id="clearBtn">結果クリア</button>
     </div>
 
@@ -92,50 +105,99 @@
       <div id="result">まだ読み取っていません。</div>
     </div>
 
-    <br>
-
     <div class="box">
-      <div class="label">簡易照合（任意）</div>
-      <p class="note">
-        下の期待値と一致したら「一致」、違えば「不一致」と表示します。<br>
-        今はダミー値 <code>TEST-001</code> を設定しています。
-      </p>
-      <div class="label">期待値</div>
-      <div id="expected">TEST-001</div>
-      <br>
-      <div class="label">照合結果</div>
-      <div id="matchResult">未判定</div>
+      <div class="label">詳細エラー</div>
+      <div id="errorBox">エラーなし</div>
     </div>
   </div>
 
-  <script src="https://unpkg.com/html5-qrcode" type="text/javascriptBtn = document.getElementById("startBtn");
+  <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+  <script>
+    const initBtn = document.getElementById("initBtn");
+    const startBtn = document.getElementById("startBtn");
     const stopBtn = document.getElementById("stopBtn");
     const clearBtn = document.getElementById("clearBtn");
     const resultEl = document.getElementById("result");
-    const matchResultEl = document.getElementById("matchResult");
-    const expectedValue = document.getElementById("expected").textContent.trim();
+    const statusEl = document.getElementById("status");
+    const errorBox = document.getElementById("errorBox");
+    const cameraSelect = document.getElementById("cameraSelect");
+    const cameraInfo = document.getElementById("cameraInfo");
 
     let scanner = null;
     let isRunning = false;
+    let cameras = [];
     let lastText = "";
 
-    function judge(value) {
-      if (value === expectedValue) {
-        matchResultEl.innerHTML = '<span class="ok">一致</span>';
-      } else {
-        matchResultEl.innerHTML = '<span class="ng">不一致</span>';
+    function setStatus(text, ok = true) {
+      statusEl.innerHTML = ok
+        ? `<span class="ok">${text}</span>`
+        : `<span class="ng">${text}</span>`;
+    }
+
+    function setError(err) {
+      if (!err) {
+        errorBox.textContent = "エラーなし";
+        return;
+      }
+      const name = err.name ? err.name : "UnknownError";
+      const msg = err.message ? err.message : String(err);
+      errorBox.innerHTML = `<span class="ng">${name}</span><br>${msg}`;
+      console.error(err);
+    }
+
+    async function initCameras() {
+      setError(null);
+      setStatus("カメラ一覧を取得中…");
+      cameraSelect.innerHTML = "";
+      cameraInfo.textContent = "取得中…";
+
+      try {
+        if (!window.Html5Qrcode) {
+          throw new Error("html5-qrcode の読み込みに失敗しています。");
+        }
+
+        cameras = await Html5Qrcode.getCameras();
+
+        if (!cameras || cameras.length === 0) {
+          throw new Error("利用可能なカメラが見つかりませんでした。");
+        }
+
+        cameras.forEach((cam, index) => {
+          const opt = document.createElement("option");
+          opt.value = cam.id;
+          opt.textContent = cam.label || `Camera ${index + 1}`;
+          cameraSelect.appendChild(opt);
+        });
+
+        cameraInfo.textContent = `${cameras.length} 台のカメラを検出しました。`;
+        setStatus("カメラ一覧取得OK");
+        startBtn.disabled = false;
+      } catch (err) {
+        setStatus("カメラ一覧取得NG", false);
+        setError(err);
+        cameraInfo.textContent = "取得に失敗しました。";
+        startBtn.disabled = true;
       }
     }
 
     async function startScanner() {
       if (isRunning) return;
+      setError(null);
+
+      const cameraId = cameraSelect.value;
+      if (!cameraId) {
+        setStatus("カメラ未選択", false);
+        return;
+      }
 
       resultEl.textContent = "カメラを起動中…";
-      scanner = new Html5Qrcode("reader");
+      setStatus("カメラ起動中…");
 
       try {
+        scanner = new Html5Qrcode("reader");
+
         await scanner.start(
-          { facingMode: "environment" },
+          { deviceId: { exact: cameraId } },
           {
             fps: 10,
             qrbox: { width: 250, height: 250 }
@@ -144,18 +206,22 @@
             if (decodedText === lastText) return;
             lastText = decodedText;
             resultEl.textContent = decodedText;
-            judge(decodedText);
+            setStatus("読み取り成功");
           },
           () => {
-            // 読み取り失敗時は何もしない
+            // 読み取り失敗時は表示を荒らさない
           }
         );
 
         isRunning = true;
         startBtn.disabled = true;
         stopBtn.disabled = false;
+        initBtn.disabled = true;
+        setStatus("カメラ起動OK");
       } catch (err) {
-        resultEl.textContent = "カメラ起動に失敗しました: " + err;
+        setStatus("カメラ起動NG", false);
+        setError(err);
+        resultEl.textContent = "起動に失敗しました。";
       }
     }
 
@@ -166,20 +232,24 @@
         await scanner.stop();
         await scanner.clear();
       } catch (err) {
-        console.error(err);
+        setError(err);
       } finally {
         isRunning = false;
         startBtn.disabled = false;
         stopBtn.disabled = true;
+        initBtn.disabled = false;
+        setStatus("停止しました");
       }
     }
 
     function clearResult() {
       lastText = "";
       resultEl.textContent = "まだ読み取っていません。";
-      matchResultEl.textContent = "未判定";
+      setError(null);
+      setStatus("初期化前");
     }
 
+    initBtn.addEventListener("click", initCameras);
     startBtn.addEventListener("click", startScanner);
     stopBtn.addEventListener("click", stopScanner);
     clearBtn.addEventListener("click", clearResult);
