@@ -1,12 +1,188 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>QR Test</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QR読取テスト</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      margin: 0;
+      padding: 16px;
+      line-height: 1.5;
+      background: #f7f7f7;
+    }
+    .wrap {
+      max-width: 720px;
+      margin: 0 auto;
+      background: #fff;
+      padding: 16px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+    }
+    h1 {
+      font-size: 1.4rem;
+      margin-top: 0;
+    }
+    #reader {
+      width: 100%;
+      max-width: 420px;
+      margin: 16px auto;
+    }
+    .btns {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+    }
+    button {
+      padding: 10px 14px;
+      border: 1px solid #999;
+      background: #fff;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .box {
+      padding: 12px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      background: #fafafa;
+      word-break: break-all;
+    }
+    .label {
+      font-weight: bold;
+      margin-bottom: 6px;
+    }
+    .note {
+      font-size: 0.9rem;
+      color: #555;
+    }
+    .ok {
+      color: #0a7a2f;
+      font-weight: bold;
+    }
+    .ng {
+      color: #b00020;
+      font-weight: bold;
+    }
+  </style>
 </head>
 <body>
-  <h1>QR Test Page</h1>
-  <p>GitHub Pages の公開確認用ページです。</p>
+  <div class="wrap">
+    <h1>QR読取テスト</h1>
+    <p class="note">
+      GitHub Pages 上で QR を読み取り、結果を表示する最小サンプルです。<br>
+      ※ ダミーデータのみで運用してください。
+    </p>
+
+    <div class="btns">
+      <button id="startBtn">カメラ開始</button>
+      <button id="stopBtn" disabled>カメラ停止</button>
+      <button id="clearBtn">結果クリア</button>
+    </div>
+
+    <div id="reader"></div>
+
+    <div class="box">
+      <div class="label">読み取り結果</div>
+      <div id="result">まだ読み取っていません。</div>
+    </div>
+
+    <br>
+
+    <div class="box">
+      <div class="label">簡易照合（任意）</div>
+      <p class="note">
+        下の期待値と一致したら「一致」、違えば「不一致」と表示します。<br>
+        今はダミー値 <code>TEST-001</code> を設定しています。
+      </p>
+      <div class="label">期待値</div>
+      <div id="expected">TEST-001</div>
+      <br>
+      <div class="label">照合結果</div>
+      <div id="matchResult">未判定</div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/html5-qrcode" type="text/javascriptBtn = document.getElementById("startBtn");
+    const stopBtn = document.getElementById("stopBtn");
+    const clearBtn = document.getElementById("clearBtn");
+    const resultEl = document.getElementById("result");
+    const matchResultEl = document.getElementById("matchResult");
+    const expectedValue = document.getElementById("expected").textContent.trim();
+
+    let scanner = null;
+    let isRunning = false;
+    let lastText = "";
+
+    function judge(value) {
+      if (value === expectedValue) {
+        matchResultEl.innerHTML = '<span class="ok">一致</span>';
+      } else {
+        matchResultEl.innerHTML = '<span class="ng">不一致</span>';
+      }
+    }
+
+    async function startScanner() {
+      if (isRunning) return;
+
+      resultEl.textContent = "カメラを起動中…";
+      scanner = new Html5Qrcode("reader");
+
+      try {
+        await scanner.start(
+          { facingMode: "environment" },
+          {
+            fps: 10,
+            qrbox: { width: 250, height: 250 }
+          },
+          (decodedText) => {
+            if (decodedText === lastText) return;
+            lastText = decodedText;
+            resultEl.textContent = decodedText;
+            judge(decodedText);
+          },
+          () => {
+            // 読み取り失敗時は何もしない
+          }
+        );
+
+        isRunning = true;
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+      } catch (err) {
+        resultEl.textContent = "カメラ起動に失敗しました: " + err;
+      }
+    }
+
+    async function stopScanner() {
+      if (!scanner || !isRunning) return;
+
+      try {
+        await scanner.stop();
+        await scanner.clear();
+      } catch (err) {
+        console.error(err);
+      } finally {
+        isRunning = false;
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+      }
+    }
+
+    function clearResult() {
+      lastText = "";
+      resultEl.textContent = "まだ読み取っていません。";
+      matchResultEl.textContent = "未判定";
+    }
+
+    startBtn.addEventListener("click", startScanner);
+    stopBtn.addEventListener("click", stopScanner);
+    clearBtn.addEventListener("click", clearResult);
+  </script>
 </body>
 </html>
