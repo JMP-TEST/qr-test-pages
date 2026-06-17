@@ -2,257 +2,367 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>QR読取テスト（デバッグ版）</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>QR出荷チェック（最終版：| 厳格 / 連続読取抑止 / 完了OKで自動リセット）</title>
+
+  <!-- QRスキャンライブラリ -->
+  <script src="https://unpkg.com/html5-qrcode"></script>
+
   <style>
-    body {
-      font-family: sans-serif;
-      margin: 0;
-      padding: 16px;
-      line-height: 1.5;
-      background: #f7f7f7;
+    body { font-family: sans-serif; margin: 12px; }
+    #reader { width: 340px; max-width: 95vw; margin-top: 10px; }
+    #status { font-size: 28px; font-weight: bold; text-align: center; margin: 8px 0; }
+    .ok { color: green; }
+    .ng { color: red; }
+    .done { color: blue; }
+    .hint { font-size: 13px; color: #444; text-align: center; margin-bottom: 6px; }
+    .small { font-size: 14px; color: #333; text-align: center; margin: 6px 0 10px; white-space: pre-wrap; }
+    ul { padding-left: 18px; }
+    li { font-size: 18px; margin: 4px 0; }
+    .controls { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+    button { font-size: 18px; padding: 10px 14px; }
+
+    /* ===== モーダル共通 ===== */
+    .modal {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.55);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 9999;
     }
-    .wrap {
-      max-width: 760px;
-      margin: 0 auto;
-      background: #fff;
-      padding: 16px;
-      border: 1px solid #ddd;
-      border-radius: 8px;
+    .hidden { display: none; }
+    .modal-content {
+      background: #fff; width: 360px; max-width: 92vw;
+      border-radius: 12px; padding: 16px 16px 14px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+      text-align: center;
     }
-    h1 { font-size: 1.4rem; margin-top: 0; }
-    #reader {
-      width: 100%;
-      max-width: 420px;
-      margin: 16px auto;
+    .modal-title { font-size: 22px; font-weight: 800; margin-bottom: 10px; }
+    .modal-message {
+      font-size: 16px; margin: 10px 0 14px; line-height: 1.45;
+      white-space: pre-wrap; word-break: break-word; text-align: left;
     }
-    .btns {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-      margin-bottom: 16px;
+    .modal-ok {
+      font-size: 18px; padding: 10px 18px;
+      border: none; border-radius: 10px;
+      background: #0078d4; color: #fff; width: 160px;
     }
-    button {
-      padding: 10px 14px;
-      border: 1px solid #999;
-      background: #fff;
-      border-radius: 6px;
-      cursor: pointer;
-    }
-    button:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-    .box {
-      padding: 12px;
-      border: 1px solid #ddd;
-      border-radius: 6px;
-      background: #fafafa;
-      word-break: break-all;
-      margin-bottom: 12px;
-    }
-    .label {
-      font-weight: bold;
-      margin-bottom: 6px;
-    }
-    .note {
-      font-size: 0.9rem;
-      color: #555;
-    }
-    .ok { color: #0a7a2f; font-weight: bold; }
-    .ng { color: #b00020; font-weight: bold; }
-    select {
-      padding: 8px;
-      min-width: 280px;
-    }
-    code {
-      background: #eee;
-      padding: 0 4px;
-      border-radius: 4px;
-    }
+    .modal-title.ng { color: #c00; }
+    .modal-title.done { color: #0a6; }
   </style>
 </head>
+
 <body>
-  <div class="wrap">
-    <h1>QR読取テスト（デバッグ版）</h1>
-    <p class="note">
-      まずは「カメラが見えているか」「権限で止まっているか」を確認します。<br>
-      ※ ダミーデータのみで運用してください。
-    </p>
+  <h2>QR出荷チェック</h2>
+  <h3 id="status">出荷指示（ORD）を読んでください</h3>
+  <div class="hint">
+    厳格仕様：区切りは「|」のみ（旧形式は非対応）。ORD→PRDの順で読み取り。
+  </div>
 
-    <div class="box">
-      <div class="label">状態</div>
-      <div id="status">初期化前</div>
-    </div>
+  <div id="last" class="small"></div>
+  <ul id="list"></ul>
 
-    <div class="box">
-      <div class="label">検出カメラ一覧</div>
-      <select id="cameraSelect"></select>
-      <div id="cameraInfo" class="note">まだ取得していません。</div>
-    </div>
+  <div id="reader"></div>
 
-    <div class="btns">
-      <button id="initBtn">カメラ一覧取得</button>
-      <button id="startBtn" disabled>選択カメラで開始</button>
-      <button id="stopBtn" disabled>停止</button>
-      <button id="clearBtn">結果クリア</button>
-    </div>
+  <div class="controls">
+    <button onclick="resetAll()">リセット</button>
+    <button onclick="togglePause()" id="pauseBtn">一時停止</button>
+  </div>
 
-    <div id="reader"></div>
-
-    <div class="box">
-      <div class="label">読み取り結果</div>
-      <div id="result">まだ読み取っていません。</div>
-    </div>
-
-    <div class="box">
-      <div class="label">詳細エラー</div>
-      <div id="errorBox">エラーなし</div>
+  <!-- NG確認モーダル（枝番重複 / 数量オーバー等） -->
+  <div id="ngModal" class="modal hidden">
+    <div class="modal-content">
+      <div id="ngTitle" class="modal-title ng">NG</div>
+      <div id="ngMessage" class="modal-message"></div>
+      <button id="ngOkBtn" class="modal-ok">OK</button>
     </div>
   </div>
 
-  <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
-  <script>
-    const initBtn = document.getElementById("initBtn");
-    const startBtn = document.getElementById("startBtn");
-    const stopBtn = document.getElementById("stopBtn");
-    const clearBtn = document.getElementById("clearBtn");
-    const resultEl = document.getElementById("result");
-    const statusEl = document.getElementById("status");
-    const errorBox = document.getElementById("errorBox");
-    const cameraSelect = document.getElementById("cameraSelect");
-    const cameraInfo = document.getElementById("cameraInfo");
+  <!-- 完了モーダル -->
+  <div id="doneModal" class="modal hidden">
+    <div class="modal-content">
+      <div id="doneTitle" class="modal-title done">出荷指示完了</div>
+      <div id="doneMessage" class="modal-message"></div>
+      <button id="doneOkBtn" class="modal-ok">OK</button>
+    </div>
+  </div>
 
-    let scanner = null;
-    let isRunning = false;
-    let cameras = [];
-    let lastText = "";
+<script>
+  // =====================================================
+  // 仕様（確定）
+  //  - ORD: ORD|銘柄|Lot|出荷数量,銘柄|Lot|出荷数量,...
+  //  - PRD: PRD|銘柄|Lot|枝番|個別数量
+  //  - PRDスキャン1回＝個別数量ぶん加算
+  //  - 同一出荷指示中、同一 銘柄|Lot で枝番重複はNG（OK押下で解除、加算しない）
+  // =====================================================
 
-    function setStatus(text, ok = true) {
-      statusEl.innerHTML = ok
-        ? `<span class="ok">${text}</span>`
-        : `<span class="ng">${text}</span>`;
+  // ===== ①：同一QR連続読取の体感改善 =====
+  const SAME_QR_IGNORE_MS = 1500; // 同一QR文字列はこの時間以内は「無視」（NGにしない）
+  const DUP_SUPPRESS_MS = 250;    // decodeイベント連打抑止（最小）
+  const SCAN_FPS = 5;            // 読み過ぎ防止（10→5推奨）
+
+  // ===== 異常データ対策 =====
+  const MAX_ITEMS_IN_ORDER = 100;
+
+  // ===== 状態 =====
+  let need = {};        // key: "code|lot" -> required qty
+  let scanned = {};     // key: "code|lot" -> accumulated qty
+  let seenEda = {};     // key: "code|lot" -> Set(eda)
+  let orderLoaded = false;
+
+  // モーダル表示中は判定ブロック（OK押下待ち）
+  let blocked = false;
+
+  // 一時停止
+  let paused = false;
+
+  // 連続読取抑止
+  let lastScan = "";
+  let lastTime = 0;
+
+  // 同一QRを一定時間無視するための履歴
+  let lastAcceptedText = "";
+  let lastAcceptedAt = 0;
+
+  // ===== 表示 =====
+  function setStatus(text, cls="") {
+    const st = document.getElementById("status");
+    st.innerText = text;
+    st.className = cls;
+  }
+  function setLast(text) {
+    document.getElementById("last").innerText = text || "";
+  }
+  function updateView() {
+    const list = document.getElementById("list");
+    list.innerHTML = "";
+
+    Object.keys(need).forEach(key => {
+      const li = document.createElement("li");
+      const done = scanned[key] ?? 0;
+      const total = need[key];
+      const edaCount = (seenEda[key] && seenEda[key].size) ? seenEda[key].size : 0;
+
+      li.innerText = `${key} : ${done} / ${total}（枝番:${edaCount}）`;
+
+      if (done === total) { li.style.color = "green"; li.innerText += " ✅"; }
+      else if (done > total) { li.style.color = "red"; li.innerText += " ⚠"; }
+
+      list.appendChild(li);
+    });
+  }
+
+  // ===== モーダル（NG） =====
+  function showNgModal(message) {
+    blocked = true;
+    document.getElementById("ngMessage").innerText = message;
+    document.getElementById("ngModal").classList.remove("hidden");
+    setTimeout(() => document.getElementById("ngOkBtn").focus(), 0);
+  }
+  function hideNgModal() {
+    document.getElementById("ngModal").classList.add("hidden");
+    blocked = false;
+  }
+
+  // ===== モーダル（完了） =====
+  function showDoneModal(message) {
+    blocked = true;
+    document.getElementById("doneMessage").innerText = message;
+    document.getElementById("doneModal").classList.remove("hidden");
+    setTimeout(() => document.getElementById("doneOkBtn").focus(), 0);
+  }
+  function hideDoneModal() {
+    document.getElementById("doneModal").classList.add("hidden");
+    blocked = false;
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    document.getElementById("ngOkBtn").addEventListener("click", () => {
+      hideNgModal();
+      setStatus("続けてスキャンしてください", "");
+    });
+
+    // ★B：完了OKで自動リセット
+    document.getElementById("doneOkBtn").addEventListener("click", () => {
+      hideDoneModal();
+      resetAll(); // ←ここがB（OKで次のORD待ちに戻す）
+    });
+  });
+
+  // ===== パース（厳格：| のみ） =====
+  function parseOrder(text) {
+    if (!text.startsWith("ORD|")) return { ok:false, error:"ORD形式エラー（ORD|で開始していません）" };
+    const body = text.slice(4);
+    if (!body) return { ok:false, error:"ORD形式エラー（明細が空です）" };
+
+    const items = body.split(",").map(s => s.trim()).filter(Boolean);
+    if (items.length === 0) return { ok:false, error:"ORD形式エラー（明細が空です）" };
+    if (items.length > MAX_ITEMS_IN_ORDER) return { ok:false, error:"ORD形式エラー（明細数が多すぎます）" };
+
+    const parsed = [];
+    for (const item of items) {
+      const parts = item.split("|");
+      if (parts.length !== 3) return { ok:false, error:"ORD明細エラー（銘柄|Lot|数量 ではありません）: " + item };
+
+      const code = parts[0].trim();
+      const lot  = parts[1].trim();
+      const qty  = parseInt(parts[2].trim(), 10);
+
+      if (!code || !lot || !Number.isFinite(qty) || qty <= 0) return { ok:false, error:"ORD明細エラー（値不正）: " + item };
+      parsed.push({ code, lot, qty });
+    }
+    return { ok:true, items: parsed };
+  }
+
+  function parseProduct(text) {
+    if (!text.startsWith("PRD|")) return { ok:false, error:"PRD形式エラー（PRD|で開始していません）" };
+    const parts = text.split("|");
+    if (parts.length !== 5) return { ok:false, error:"PRD形式エラー（PRD|銘柄|Lot|枝番|個別数量 ではありません）" };
+
+    const code = parts[1].trim();
+    const lot  = parts[2].trim();
+    const eda  = parts[3].trim();
+    const unitQty = parseInt(parts[4].trim(), 10);
+
+    if (!code || !lot) return { ok:false, error:"PRD値エラー（銘柄/Lotが空）" };
+    if (!eda) return { ok:false, error:"PRD値エラー（枝番が空）" };
+    if (!Number.isFinite(unitQty) || unitQty <= 0) return { ok:false, error:"PRD値エラー（個別数量が不正）" };
+
+    return { ok:true, code, lot, eda, unitQty };
+  }
+
+  // ===== ORDロード =====
+  function loadOrder(ordItems) {
+    need = {}; scanned = {}; seenEda = {}; orderLoaded = false;
+
+    ordItems.forEach(({code, lot, qty}) => {
+      const key = `${code}|${lot}`;
+      need[key] = (need[key] ?? 0) + qty;
+      if (!seenEda[key]) seenEda[key] = new Set();
+    });
+
+    orderLoaded = true;
+    setStatus("出荷指示読み込み完了", "done");
+    setLast("");
+    updateView();
+  }
+
+  // ===== スキャン処理 =====
+  function onScanSuccess(decodedText) {
+    if (blocked || paused) return;
+
+    const text = (decodedText || "").trim();
+    const now = Date.now();
+
+    // decodeイベント連打抑止
+    if (text === lastScan && (now - lastTime) < DUP_SUPPRESS_MS) return;
+    lastScan = text; lastTime = now;
+
+    // ①：同一QRは一定時間無視（NGにしない）
+    if (text === lastAcceptedText && (now - lastAcceptedAt) < SAME_QR_IGNORE_MS) {
+      return;
     }
 
-    function setError(err) {
-      if (!err) {
-        errorBox.textContent = "エラーなし";
+    // ORD未読：ORDのみ
+    if (!orderLoaded) {
+      const ord = parseOrder(text);
+      if (!ord.ok) {
+        setStatus("NG（先に出荷指示ORDを読んでください）", "ng");
+        setLast(ord.error);
         return;
       }
-      const name = err.name ? err.name : "UnknownError";
-      const msg = err.message ? err.message : String(err);
-      errorBox.innerHTML = `<span class="ng">${name}</span><br>${msg}`;
-      console.error(err);
+      lastAcceptedText = text; lastAcceptedAt = now;
+      loadOrder(ord.items);
+      return;
     }
 
-    async function initCameras() {
-      setError(null);
-      setStatus("カメラ一覧を取得中…");
-      cameraSelect.innerHTML = "";
-      cameraInfo.textContent = "取得中…";
-
-      try {
-        if (!window.Html5Qrcode) {
-          throw new Error("html5-qrcode の読み込みに失敗しています。");
-        }
-
-        cameras = await Html5Qrcode.getCameras();
-
-        if (!cameras || cameras.length === 0) {
-          throw new Error("利用可能なカメラが見つかりませんでした。");
-        }
-
-        cameras.forEach((cam, index) => {
-          const opt = document.createElement("option");
-          opt.value = cam.id;
-          opt.textContent = cam.label || `Camera ${index + 1}`;
-          cameraSelect.appendChild(opt);
-        });
-
-        cameraInfo.textContent = `${cameras.length} 台のカメラを検出しました。`;
-        setStatus("カメラ一覧取得OK");
-        startBtn.disabled = false;
-      } catch (err) {
-        setStatus("カメラ一覧取得NG", false);
-        setError(err);
-        cameraInfo.textContent = "取得に失敗しました。";
-        startBtn.disabled = true;
-      }
+    // ORD読込済：PRDのみ
+    const prd = parseProduct(text);
+    if (!prd.ok) {
+      setStatus("NG（製品PRDを読んでください）", "ng");
+      setLast(prd.error);
+      return;
     }
 
-    async function startScanner() {
-      if (isRunning) return;
-      setError(null);
+    const key = `${prd.code}|${prd.lot}`;
 
-      const cameraId = cameraSelect.value;
-      if (!cameraId) {
-        setStatus("カメラ未選択", false);
-        return;
-      }
-
-      resultEl.textContent = "カメラを起動中…";
-      setStatus("カメラ起動中…");
-
-      try {
-        scanner = new Html5Qrcode("reader");
-
-        await scanner.start(
-          { deviceId: { exact: cameraId } },
-          {
-            fps: 10,
-            qrbox: { width: 250, height: 250 }
-          },
-          (decodedText) => {
-            if (decodedText === lastText) return;
-            lastText = decodedText;
-            resultEl.textContent = decodedText;
-            setStatus("読み取り成功");
-          },
-          () => {
-            // 読み取り失敗時は表示を荒らさない
-          }
-        );
-
-        isRunning = true;
-        startBtn.disabled = true;
-        stopBtn.disabled = false;
-        initBtn.disabled = true;
-        setStatus("カメラ起動OK");
-      } catch (err) {
-        setStatus("カメラ起動NG", false);
-        setError(err);
-        resultEl.textContent = "起動に失敗しました。";
-      }
+    if (!(key in need)) {
+      setStatus("NG（対象外 or Lot違い）", "ng");
+      setLast(`読取: ${prd.code} Lot:${prd.lot} 枝番:${prd.eda} 個別数量:${prd.unitQty}`);
+      return;
     }
 
-    async function stopScanner() {
-      if (!scanner || !isRunning) return;
-
-      try {
-        await scanner.stop();
-        await scanner.clear();
-      } catch (err) {
-        setError(err);
-      } finally {
-        isRunning = false;
-        startBtn.disabled = false;
-        stopBtn.disabled = true;
-        initBtn.disabled = false;
-        setStatus("停止しました");
-      }
+    // 枝番重複NG（OKで解除／加算しない）
+    if (seenEda[key].has(prd.eda)) {
+      setStatus("NG（枝番重複）", "ng");
+      showNgModal(
+        `同じ枝番を二度読み込みました。\n\n銘柄: ${prd.code}\nLot: ${prd.lot}\n枝番: ${prd.eda}\n\nOKを押して継続してください。`
+      );
+      setLast(`重複: ${prd.code} Lot:${prd.lot} 枝番:${prd.eda}（加算なし）`);
+      return;
     }
 
-    function clearResult() {
-      lastText = "";
-      resultEl.textContent = "まだ読み取っていません。";
-      setError(null);
-      setStatus("初期化前");
+    // 個別数量ぶん加算
+    const current = scanned[key] ?? 0;
+    const inc = prd.unitQty;
+
+    // 数量オーバーは加算しない
+    if (current + inc > need[key]) {
+      setStatus("NG（数量オーバー）", "ng");
+      showNgModal(
+        `出荷数量を超えるため加算しません。\n\n銘柄: ${prd.code}\nLot: ${prd.lot}\n枝番: ${prd.eda}\n加算予定: ${inc}\n現在: ${current} / 必要: ${need[key]}\n\nOKを押して継続してください。`
+      );
+      setLast(`オーバー: ${prd.code} Lot:${prd.lot} 枝番:${prd.eda}（加算なし）`);
+      return;
     }
 
-    initBtn.addEventListener("click", initCameras);
-    startBtn.addEventListener("click", startScanner);
-    stopBtn.addEventListener("click", stopScanner);
-    clearBtn.addEventListener("click", clearResult);
-  </script>
+    // OK：登録→加算
+    seenEda[key].add(prd.eda);
+    scanned[key] = current + inc;
+
+    lastAcceptedText = text; lastAcceptedAt = now;
+
+    setStatus("OK", "ok");
+    setLast(`読取: ${prd.code} Lot:${prd.lot} 枝番:${prd.eda} 個別数量:${prd.unitQty}（+${inc}）`);
+    updateView();
+
+    // ②：完了時に完了モーダル
+    const complete = Object.keys(need).every(k => (scanned[k] ?? 0) === need[k]);
+    if (complete) {
+      setStatus("✅ 出荷指示完了", "done");
+      showDoneModal("出荷指示の全項目が完了しました。\n\nOKで次の出荷指示（ORD）待ちに戻ります。");
+    }
+  }
+
+  // ===== 操作 =====
+  function resetAll() {
+    need = {}; scanned = {}; seenEda = {}; orderLoaded = false;
+    blocked = false; paused = false;
+
+    document.getElementById("ngModal").classList.add("hidden");
+    document.getElementById("doneModal").classList.add("hidden");
+
+    lastAcceptedText = ""; lastAcceptedAt = 0;
+    lastScan = ""; lastTime = 0;
+
+    setStatus("出荷指示（ORD）を読んでください", "");
+    setLast("");
+    document.getElementById("list").innerHTML = "";
+    document.getElementById("pauseBtn").innerText = "一時停止";
+  }
+
+  function togglePause() {
+    paused = !paused;
+    document.getElementById("pauseBtn").innerText = paused ? "再開" : "一時停止";
+    setStatus(paused ? "一時停止中" : "続けてスキャンしてください", "");
+  }
+
+  // ===== カメラ起動 =====
+  const scanner = new Html5Qrcode("reader");
+  scanner.start(
+    { facingMode: "environment" },
+    { fps: SCAN_FPS, qrbox: 250 },
+    onScanSuccess
+  );
+</script>
 </body>
 </html>
